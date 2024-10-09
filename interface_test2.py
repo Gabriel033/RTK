@@ -61,7 +61,7 @@ def calcular_setpoints_desde_ruta(route, interval=0.00004):  # Intervalo en grad
 
             # Guardamos el nuevo setpoint
             setpoints.append(tuple(nuevo_punto.tolist()))
-            # print(f"Setpoint generado: {nuevo_punto}")
+            #print(f"Setpoint generado: {nuevo_punto}")
 
             # Actualizamos la distancia acumulada y avanzamos al siguiente punto
             distancia_segmento -= interval
@@ -301,7 +301,7 @@ def mostrar_mapa():
             // Función para limpiar el mapa
             function clearMap() {{
                 isUpdating = false;
-
+                
                 if (routePolyline) {{
                     map.removeLayer(routePolyline);
                 }}
@@ -403,6 +403,7 @@ def calculate_route():
     else:
         route = route_coords  # Almacenar la ruta correctamente
         return jsonify({"route": route_coords})
+
 
 
 @app.route('/set_destination')
