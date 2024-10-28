@@ -7,6 +7,7 @@ import numpy as np
 import time
 from threading import Thread
 from RTK_Real_Data import obtener_datos_gps_rtk  # Importa la función de RTK
+from conf import RTK_OPTIONS
 
 app = Flask(__name__)
 offline_mode = None
@@ -19,7 +20,7 @@ G = None
 setpoints = []  # Lista para guardar las coordenadas de los puntos de la ruta
 
 # Cambiar entre coordenadas manuales y RTK
-use_manual_coordinates = True  # Cambia a False para usar el RTK
+use_manual_coordinates = False  # Cambia a False para usar el RTK
 posicion_manual = [19.017360, -98.242064]  # Coordenadas manuales
 
 
@@ -136,7 +137,7 @@ def actualizar_posicion():
         if use_manual_coordinates:
             current_position = posicion_manual  # Coordenadas manuales
         else:
-            for lat, lon in obtener_datos_gps_rtk('COM4', 9600):
+            for lat, lon in obtener_datos_gps_rtk(RTK_OPTIONS.get('port'), RTK_OPTIONS.get('baud_rate')):
                 current_position = [lat, lon]
                 break
 
@@ -447,7 +448,7 @@ if __name__ == "__main__":
     if use_manual_coordinates:
         current_position = posicion_manual  # Coordenadas manuales
     else:
-        current_position = next(obtener_datos_gps_rtk('COM4', 9600))
+        current_position = next(obtener_datos_gps_rtk(RTK_OPTIONS.get('port'), RTK_OPTIONS.get('baud_rate')))
 
     # Preguntar si se quiere iniciar en modo offline
     user_input = input("¿Deseas iniciar en modo offline? (s/n): ").strip().lower()

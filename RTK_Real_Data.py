@@ -1,19 +1,21 @@
 import serial
 import time
+from conf import RTK_OPTIONS
+count = 0
 
 
 # Función para obtener los datos GPS desde un dispositivo RTK conectado a un puerto serial
 def obtener_datos_gps_rtk(puerto, velocidad_baudios):
-    global ser
+    global ser, count
     try:
         # Conectar al dispositivo RTK usando el puerto serial
         ser = serial.Serial(puerto, velocidad_baudios, timeout=1)
-        print(f"Conectado al dispositivo RTK en {puerto} a {velocidad_baudios} baudios")
-
+        if count == 0:
+            print(f"Conectado al dispositivo RTK en {puerto} a {velocidad_baudios} baudios")
+            count = 1
         while True:
             # Leer una línea del dispositivo RTK
             linea = ser.readline().decode('utf-8', errors='replace').strip()
-            print(linea)
 
             # Comprobar si la línea contiene una frase GGA de NMEA, que proporciona los datos de posición
             if linea.startswith('$GNGGA') or linea.startswith('$GPGGA'):
@@ -32,7 +34,7 @@ def obtener_datos_gps_rtk(puerto, velocidad_baudios):
                         yield (latitud, longitud)
             else:
                 # Si no hay datos GGA, esperar brevemente y volver a intentar
-                time.sleep(0.1)
+                time.sleep(0.01)
 
     except serial.SerialException as e:
         print(f"Error al abrir el puerto {puerto}: {e}")
@@ -71,7 +73,7 @@ def convertir_longitud(longitud_nmea, direccion):
 
 
 if __name__ == "__main__":
-    puerto = 'COM3'
-    baud_rate = 9600
+    puerto = RTK_OPTIONS.get('port')
+    baud_rate = RTK_OPTIONS.get('baud_rate')
     for lat, lon in obtener_datos_gps_rtk(puerto, baud_rate):
         print(f"Latitud: {lat}, Longitud: {lon}")
