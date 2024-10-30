@@ -5,9 +5,10 @@ import osmnx as ox
 import networkx as nx
 import numpy as np
 import time
-from threading import Thread
+from threading import Thread, Lock
 from RTK_Real_Data import obtener_datos_gps_rtk  # Importa la función de RTK
 from conf import RTK_OPTIONS
+from geopy.distance import geodesic
 
 app = Flask(__name__)
 offline_mode = None
@@ -22,7 +23,7 @@ setpoints = []  # Lista para guardar las coordenadas de los puntos de la ruta
 # Cambiar entre coordenadas manuales y RTK
 use_manual_coordinates = False  # Cambia a False para usar el RTK
 posicion_manual = [19.017360, -98.242064]  # Coordenadas manuales
-
+position_lock = Lock()
 
 def inicializar_grafo():
     global G
@@ -40,7 +41,7 @@ def inicializar_grafo():
         print("Grafo descargado desde OpenStreetMap.")
 
 
-def calcular_setpoints_desde_ruta(route, interval=0.00004):  # Intervalo en grados (aprox. 0.5 metros)
+def calcular_setpoints_desde_ruta(route, interval=0.000009):  # Intervalo en grados se obtiene con la fórmula intervalo = metros / 111,320 (aprox. 2 metro)
     global setpoints
     setpoints = []
 
@@ -130,27 +131,18 @@ def calcular_ruta(origen, destino):
 
 # Función para vaciar los setpoints al llegar al destino
 def actualizar_posicion():
-    global current_position, is_moving, route, destination, setpoints
+    global current_position, is_moving
     is_moving = True
     while True:
         # Usar coordenadas manuales o las del RTK
         if use_manual_coordinates:
-            current_position = posicion_manual  # Coordenadas manuales
+            with position_lock:
+                current_position = posicion_manual  # Coordenadas manuales
         else:
             for lat, lon in obtener_datos_gps_rtk(RTK_OPTIONS.get('port'), RTK_OPTIONS.get('baud_rate')):
-                current_position = [lat, lon]
+                with position_lock:
+                    current_position = [lat, lon]
                 break
-
-        if route and destination:
-            if np.linalg.norm(np.array(current_position) - np.array(destination)) < 0.0001:
-                route = []
-                destination = None
-                ruta_confirmada = False
-                setpoints = []  # Vaciar los setpoints al llegar al destino
-                notify_arrival()  # Mostrar alerta de llegada al destino
-                break
-        time.sleep(0.5)
-    is_moving = False
 
 
 # Función para enviar la ruta actualizada al frontend
@@ -163,7 +155,10 @@ def enviar_ruta_actualizada():
 
 @app.route('/get_position', methods=['GET'])
 def get_position():
-    return jsonify({"lat": current_position[0], "lon": current_position[1]})
+    with position_lock:
+        lat, lon = current_position
+    response = jsonify({"lat": lat, "lon": lon})
+    return response
 
 
 @app.route('/update_route', methods=['POST'])
@@ -173,10 +168,37 @@ def update_route():
     return jsonify({"status": "success"})
 
 
-@app.route('/notify_arrival', methods=['POST'])
-def notify_arrival():
-    return jsonify({"message": "Has llegado a tu destino"})
+@app.route('/check_arrival', methods=['GET'])
+def check_arrival():
+    global current_position, destination, route, ruta_confirmada, setpoints
+    if destination:
+        with position_lock:
+            current_pos = current_position.copy()
+        distance_to_destination = geodesic(current_position, destination).meters
+        last_setpoint = setpoints[-1]
+        distance_to_last_setpoint = geodesic(current_position, last_setpoint).meters
 
+        if distance_to_destination < 5 or distance_to_last_setpoint < 5:  # 1 m threshold
+            route = []
+            destination = None
+            ruta_confirmada = False
+            setpoints = []  # Vaciar los setpoints al llegar al destino
+            return jsonify({"message": "Has llegado a tu destino"})
+    return jsonify({"message": ""})
+
+@app.route('/get_distance_remaining', methods=['GET'])
+def get_distance_remaining():
+    global current_position, destination, setpoints
+    if destination:
+        with position_lock:
+            current_pos = current_position.copy()
+
+        # Calcular la distancia restante
+        distance_remaining = geodesic(current_pos, destination).meters
+
+        return jsonify({"distance_remaining": distance_remaining})
+    else:
+        return jsonify({"distance_remaining": 0})
 
 @app.route('/')
 def mostrar_mapa():
@@ -221,6 +243,10 @@ def mostrar_mapa():
             style="position: absolute; bottom: 20px; left: 10px; font-size: 40px; padding: 40px 60px;"
             onclick="centrarEnVehiculo()">CENTRAR EN EL VEHÍCULO
         </button>
+        <div id="distanciaRestanteText" 
+            style="position: absolute; bottom: 20px; left: 75%; font-size: 40px; padding: 40px 10px;">
+            DISTANCIA: 0 m
+        </div>
         <script>
             var rutaConfirmada = {str(ruta_confirmada).lower()};
             var seguirVehiculo = false;  // Flag para controlar si seguimos o no al vehículo
@@ -293,9 +319,11 @@ def mostrar_mapa():
                     .catch(error => console.error('Error al actualizar la ruta:', error));
             }}
 
-            // Actualizar la posición, la ruta y los setpoints cada segundo
-            setInterval(updatePosition, 1000);
-            setInterval(updateRoute, 1000);
+            // Actualizar la posición, la ruta y los setpoints en un tiempo determinado
+            setInterval(updatePosition, 10);
+            setInterval(updateRoute, 100);
+            setInterval(checkArrival, 10);
+            setInterval(updateDistanceRemaining, 10);
 
             var destinationMarker;
 
@@ -321,20 +349,53 @@ def mostrar_mapa():
                 }}
                 document.getElementById('cambiarRutaBtn').style.display = 'none';
                 rutaConfirmada = false;
+                
+                // Clear the route on the server
+                fetch('/clear_route')
+                    .then(response => response.text())
+                    .then(data => {{
+                        console.log('Route and destination cleared on the server');
+                    }});
             }}
 
             // Función para notificar llegada y limpiar el mapa
-            function notify_arrival() {{
-                fetch('/notify_arrival', {{method: 'POST'}})
-                .then(response => response.json())
-                .then(data => {{
-                    alert(data.message);
-                    clearMap();  // Limpiar el mapa después de cerrar la alerta
-                }});
+            function checkArrival() {{
+                fetch('/check_arrival')
+                    .then(response => response.json())
+                    .then(data => {{
+                        if (data.message) {{
+                            alert(data.message);
+                            clearMap();  // Limpiar el mapa después de cerrar la alerta
+                            rutaConfirmada = false;  // Reinicia la bandera de ruta confirmada
+                            document.getElementById('cambiarRutaBtn').style.display = 'none';  // Oculta el botón
+                        }}
+                    }});
             }}
 
             function cambiarRuta() {{
                 clearMap();
+            }}
+            
+            // 
+            function updateDistanceRemaining() {{
+                fetch('/get_distance_remaining')
+                    .then(response => response.json())
+                    .then(data => {{
+                        var distanciaElemento = document.getElementById('distanciaRestanteText');
+                        var distance_remaining = data.distance_remaining;
+                        if (distance_remaining !== null && distance_remaining !== undefined) {{
+                            var distanceText;
+                            if (distance_remaining >= 1000) {{
+                                distanceText = (distance_remaining / 1000).toFixed(2) + " km";
+                            }} else {{
+                                distanceText = distance_remaining.toFixed(2) + " m";
+                            }}
+                            distanciaElemento.innerText = `DISTANCIA: ${{distanceText}}`;
+                        }} else {{
+                            distanciaElemento.innerText = `DISTANCIA: 0 km`;
+                        }}
+                    }})
+                    .catch(error => console.error('Error al obtener la distancia restante:', error));
             }}
 
             // Función para dibujar la ruta en el mapa
@@ -347,7 +408,7 @@ def mostrar_mapa():
                 setTimeout(() => {{
                     var confirmed = confirm("¿Es correcta la posición de destino?");
                     if (confirmed) {{
-                        fetch(`/set_destination?lat=${{routeCoords[routeCoords.length - 1][0]}}&lon=${{routeCoords[routeCoords.length - 1][1]}}`).then(() => {{
+                        fetch(`/set_destination?lat=${{clickedLat}}&lon=${{clickedLon}}`).then(() => {{
                             rutaConfirmada = true;
                             document.getElementById('cambiarRutaBtn').style.display = 'block';
                         }});
@@ -356,13 +417,17 @@ def mostrar_mapa():
                     }}
                 }}, 500);
             }}
-
+            
+            var clickedLat, clickedLon;
             // Manejador de clics en el mapa
             map.on('click', function(e) {{
                 if (rutaConfirmada) {{
                     alert("Ya hay una ruta confirmada. Use el botón CAMBIAR RUTA para seleccionar un nuevo destino.");
                     return;
                 }}
+                
+                clickedLat = e.latlng.lat;
+                clickedLon = e.latlng.lng;
 
                 if (destinationMarker) {{
                     map.removeLayer(destinationMarker);
