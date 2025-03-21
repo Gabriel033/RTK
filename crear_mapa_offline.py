@@ -11,8 +11,8 @@ except:
     print("Dispositivo RTK no detectado, guardando mapa con coordenadas manuales")
     current_position = [19.017360, -98.242064]
 
-# Definir un radio de 1 kilómetro alrededor de la ubicación del RTK
-dist = 2000  # Distancia en metros
+# Definir un radio de alrededor de la ubicación del RTK
+dist = 1000  # Distancia en metros
 
 # Descargar el grafo para la red vial en un radio de 1 kilómetro
 G = ox.graph_from_point(current_position, dist=dist, network_type='all', simplify=False)
@@ -24,4 +24,6 @@ G = ox.graph_from_gdfs(ox.graph_to_gdfs(G, nodes=True)[0], edges)
 ox.save_graphml(G, filepath="templates/grafo_rtk.graphml")
 print("Mapa guardado!")
 
-ox.plot_graph(G)
+# Visualización del grafo del mapa, con los nodos y conexiones (calles y cruces)
+# ox.plot_graph(G, bgcolor='white', node_color='red', node_size=10, edge_color='gray')
+
