@@ -1,29 +1,30 @@
-import requests
-from flask import Flask, render_template_string, request, jsonify
-import folium
-import osmnx as ox
-import networkx as nx
-import numpy as np
+import requests # Para hacer peticiones HTTP
+from flask import Flask, render_template_string, request, jsonify # Para crear una app web simple
+import folium # Para generar mapas interactivos en HTML
+import osmnx as ox # Para descargar y procesar mapas desde OpenStreetMap
+import networkx as nx # Para trabajar con grafos (rutas, nodos, caminos)
+import numpy as np # Para cálculos con vectores y matrices
 import time
-from threading import Thread, Lock
-from RTK_Real_Data import obtener_datos_gps_rtk  # Importa la función de RTK
-from conf import RTK_OPTIONS
-from geopy.distance import geodesic
+from threading import Thread, Lock # Para manejar hilos (ejecuciones paralelas)
+from RTK_Real_Data import obtener_datos_gps_rtk  # Importa la función de RTK para obtener datos en tiempo real
+from conf import RTK_OPTIONS # Configuración del puerto y los baudios
+from geopy.distance import geodesic # Calcula la distancia entre dos coordenadas (en metros)
 
-app = Flask(__name__)
-offline_mode = None
-current_position = None
-destination = None
-route = None
-is_moving = False
+app = Flask(__name__) # Se crea la app Flask
+
+# Inicialización de variables globales
+offline_mode = None         # Modo sin conexión a internet
+current_position = None     # Posición actual del vehículo
+destination = None          # Destino seleccionado en el mapa
+route = None                # Ruta calculada
 ruta_confirmada = False
-G = None
-setpoints = []  # Lista para guardar las coordenadas de los puntos de la ruta
+G = None                    # El grafo de calles
+setpoints = []              # Lista para guardar las coordenadas de los puntos de la ruta
 
 # Cambiar entre coordenadas manuales y RTK
-use_manual_coordinates = True  # Cambia a False para usar el RTK
-posicion_manual = [19.017360, -98.242064]  # Coordenadas manuales
-position_lock = Lock()
+use_manual_coordinates = True               # Cambia a False para usar el RTK. Si es True, se usa una posición fija
+posicion_manual = [19.017360, -98.242064]   # Coordenadas manuales
+position_lock = Lock()                      # Para evitar que dos hilos accedan a la posición al mismo tiempo
 
 def inicializar_grafo():
     global G
@@ -32,7 +33,7 @@ def inicializar_grafo():
         G = ox.load_graphml(filepath="templates/grafo_rtk.graphml")
         print("Grafo cargado desde el archivo local.")
     else:
-        # Descargar el grafo desde OSM en tiempo real
+        # Descargar el grafo desde osmnx en tiempo real
         G = ox.graph_from_point(current_position, dist=500, network_type='all', simplify=False)
         edges = ox.graph_to_gdfs(G, nodes=False)
         edges = edges[edges['highway'].isin(
@@ -131,8 +132,7 @@ def calcular_ruta(origen, destino):
 
 # Función para vaciar los setpoints al llegar al destino
 def actualizar_posicion():
-    global current_position, is_moving
-    is_moving = True
+    global current_position
     while True:
         # Usar coordenadas manuales o las del RTK
         if use_manual_coordinates:
@@ -144,14 +144,6 @@ def actualizar_posicion():
                 with position_lock:
                     current_position = [lat, lon]
                 break
-
-
-# Función para enviar la ruta actualizada al frontend
-def enviar_ruta_actualizada():
-    global route
-    if route:
-        route_coords = [{"lat": coord[0], "lon": coord[1]} for coord in route]
-        requests.post('http://127.0.0.1:5000/update_route', json={"route": route_coords})
 
 
 @app.route('/get_position', methods=['GET'])
