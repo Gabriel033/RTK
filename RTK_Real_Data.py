@@ -45,7 +45,7 @@ def obtener_datos_gps_rtk(puerto, velocidad_baudios):
                                     if latitud is not None and longitud is not None:
                                         yield (latitud, longitud)
                             else:
-                                # Procesar sentencia GGA
+                                # Procesar sentencia GPGGA o GNGGA
                                 if len(datos) > 9 and datos[2] and datos[4]:
                                     latitud = convertir_latitud(datos[2], datos[3])
                                     longitud = convertir_longitud(datos[4], datos[5])

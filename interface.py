@@ -138,6 +138,7 @@ def actualizar_posicion():
         if use_manual_coordinates:
             with position_lock:
                 current_position = posicion_manual  # Coordenadas manuales
+            time.sleep(0.5)
         else:
             for lat, lon in obtener_datos_gps_rtk(RTK_OPTIONS.get('port'), RTK_OPTIONS.get('baud_rate')):
                 with position_lock:
@@ -188,15 +189,32 @@ def check_arrival():
 
 @app.route('/get_distance_remaining', methods=['GET'])
 def get_distance_remaining():
-    global current_position, destination, setpoints
-    if destination:
+    global current_position, destination, setpoints, G, route
+    if destination and route:
         with position_lock:
             current_pos = current_position.copy()
 
-        # Calcular la distancia restante
-        distance_remaining = geodesic(current_pos, destination).meters
+        try:
+            # Obtener nodo más cercano a la posición actual
+            nodo_actual = ox.distance.nearest_nodes(G, current_pos[1], current_pos[0])
 
-        return jsonify({"distance_remaining": distance_remaining})
+            # Obtener nodo más cercano al destino
+            nodo_destino = ox.distance.nearest_nodes(G, destination[1], destination[0])
+
+            # Obtener ruta más corta desde la posición actual al destino
+            if nx.has_path(G, nodo_actual, nodo_destino):
+                ruta_actual = nx.shortest_path(G, nodo_actual, nodo_destino, weight='length')
+                distancia_total = sum(
+                    G.edges[ruta_actual[i], ruta_actual[i + 1], 0]['length']
+                    for i in range(len(ruta_actual) - 1)
+                )
+                return jsonify({"distance_remaining": distancia_total})
+            else:
+                return jsonify({"distance_remaining": 0})
+
+        except Exception as e:
+            print("Error al calcular distancia restante:", e)
+            return jsonify({"distance_remaining": 0})
     else:
         return jsonify({"distance_remaining": 0})
 
@@ -331,24 +349,29 @@ def mostrar_mapa():
             function clearMap() {{
                 isUpdating = false;
 
-                if (routePolyline) {{
+                // Eliminación visual de setpoints y ruta
+                if (routePolyline && map.hasLayer(routePolyline)) {{
                     map.removeLayer(routePolyline);
                 }}
-                if (destinationMarker) {{
+                routePolyline = null;
+                if (destinationMarker && map.hasLayer(destinationMarker)) {{
                     map.removeLayer(destinationMarker);
                 }}
+                destinationMarker = null;
                 // Limpiar los setpoints del mapa
                 if (setpointMarkers && setpointMarkers.length > 0) {{
                     setpointMarkers.forEach(function(marker) {{
-                        map.removeLayer(marker);  // Eliminar cada marcador de setpoints
+                        if (map.hasLayer(marker)) {{
+                            map.removeLayer(marker);  // Eliminar cada marcador de setpoints
+                        }}
                     }});
                     console.log("Setpoints eliminados:", setpointMarkers.length);
                     setpointMarkers = [];  // Vaciar el array de setpoints después de eliminarlos
                 }} else {{
                     console.log("No hay setpoints para eliminar.");
                 }}
-                document.getElementById('cambiarRutaBtn').style.display = 'none';
                 rutaConfirmada = false;
+                document.getElementById('cambiarRutaBtn').style.display = 'none';
                 
                 // Clear the route on the server
                 fetch('/clear_route')
@@ -404,13 +427,13 @@ def mostrar_mapa():
                     map.removeLayer(routePolyline);
                 }}
                 routePolyline = L.polyline(routeCoords, {{color: 'blue', weight: 5}}).addTo(map);  // Línea punteada
-                isUpdating = true;
                 setTimeout(() => {{
                     var confirmed = confirm("¿Es correcta la posición de destino?");
                     if (confirmed) {{
                         fetch(`/set_destination?lat=${{clickedLat}}&lon=${{clickedLon}}`).then(() => {{
                             rutaConfirmada = true;
                             document.getElementById('cambiarRutaBtn').style.display = 'block';
+                            isUpdating = true;
                         }});
                     }} else {{
                         clearMap();  // Si no se confirma, limpiar el mapa
@@ -484,10 +507,11 @@ def set_destination():
 
 @app.route('/clear_route')
 def clear_route():
-    global destination, route, ruta_confirmada
+    global destination, route, ruta_confirmada, setpoints
     destination = None
     route = None
     ruta_confirmada = False
+    setpoints = []
     return "Ruta y destino borrados"
 
 
