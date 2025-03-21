@@ -21,7 +21,7 @@ G = None
 setpoints = []  # Lista para guardar las coordenadas de los puntos de la ruta
 
 # Cambiar entre coordenadas manuales y RTK
-use_manual_coordinates = False  # Cambia a False para usar el RTK
+use_manual_coordinates = True  # Cambia a False para usar el RTK
 posicion_manual = [19.017360, -98.242064]  # Coordenadas manuales
 position_lock = Lock()
 
@@ -177,7 +177,7 @@ def check_arrival():
         distance_to_destination = geodesic(current_position, destination).meters
         last_setpoint = setpoints[-1]
         distance_to_last_setpoint = geodesic(current_position, last_setpoint).meters
-
+        print(setpoints)
         if distance_to_destination < 5 or distance_to_last_setpoint < 5:  # 1 m threshold
             route = []
             destination = None
