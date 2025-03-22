@@ -130,7 +130,6 @@ def calcular_ruta(origen, destino):
         return {"error": str(e)}
 
 
-# Función para vaciar los setpoints al llegar al destino
 def actualizar_posicion():
     global current_position
     while True:
